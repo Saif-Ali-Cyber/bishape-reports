@@ -3,65 +3,62 @@ import pandas as pd
 import sqlite3
 import google.generativeai as genai
 
-# 1. Page Config & AI Setup
-st.set_page_config(page_title="Bishape AI Reports", layout="wide")
-st.title("🤖 Bishape AI Data Assistant (100MB Pro)")
+# 1. AI Setup (Bilkul Clean)
+st.set_page_config(page_title="Bishape AI Pro", layout="wide")
+st.title("🤖 Bishape Smart AI Reporter")
 
-# Secrets se API Key uthana
+# API Key ko saaf karke uthana (Extra space hata kar)
 try:
-    api_key = st.secrets["GEMINI_API_KEY"]
+    raw_key = st.secrets["GEMINI_API_KEY"]
+    api_key = raw_key.strip() # Strip se f फालतू spaces hat jayenge
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash') # 1.5-flash fast hai aur badi file handle karta hai
-except:
-    st.error("Bhai, Streamlit Secrets mein API Key nahi mili!")
+    model = genai.GenerativeModel('gemini-1.5-flash')
+except Exception as e:
+    st.error("Bhai API Key setup mein dikkat hai. Streamlit Secrets check kar.")
     st.stop()
 
-# 2. Heavy File Upload & Processing
-uploaded_file = st.file_uploader("Apni Excel ya CSV file upload karein", type=['xlsx', 'csv'])
+# 2. Heavy File Processing
+uploaded_file = st.file_uploader("Apni 100MB wali file dalo", type=['xlsx', 'csv'])
 
 @st.cache_data
-def process_data(file):
-    # Memory bachane ke liye chunking ya fast processing
-    if file.name.endswith('.csv'):
-        df = pd.read_csv(file)
-    else:
-        df = pd.read_excel(file)
-    
-    # SQLite Database banana (Badi files ke liye zaruri)
-    conn = sqlite3.connect('data.db')
+def load_to_db(file):
+    # Data load karo
+    df = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
+    # Database se connect karo
+    conn = sqlite3.connect('bishape_data.db', check_same_thread=False)
+    # Data ko SQL table mein daal do
     df.to_sql('mytable', conn, if_exists='replace', index=False)
-    
-    # AI ko sirf columns aur thoda sa data dikhayenge taaki wo confuse na ho
-    summary = df.head(10).to_string() 
-    cols = df.columns.tolist()
-    return df, cols, summary
+    return df.columns.tolist(), len(df)
 
 if uploaded_file:
-    with st.spinner('100MB file hai bhai, thoda sabr rakh...'):
-        df, columns, data_summary = process_data(uploaded_file)
-        st.success(f"File loaded! {len(df)} rows mil gayi hain.")
+    cols, row_count = load_to_db(uploaded_file)
+    st.success(f"File Ready! {row_count} rows aur {len(cols)} columns mile.")
 
-    # 3. AI Chat Interface
-    st.divider()
-    st.subheader("💬 Apne Data Se Baat Karein")
-    query = st.text_input("Sawal pucho: (e.g. Total sales kitni hui? Ya top 5 customers kaun hain?)")
+    # 3. Chat Logic
+    query = st.text_input("Data ke baare mein pucho (e.g. Total sales kitni hai?)")
 
     if query:
-        with st.spinner('AI data check kar raha hai...'):
-            # AI ko "Context" dena ki data kaisa hai
+        with st.spinner('AI dimaag laga raha hai...'):
+            # AI ko sirf Columns dikhao, pura data nahi!
             prompt = f"""
-            You are a data expert. Here is the structure of the user's data:
-            Columns: {columns}
-            Sample Data: {data_summary}
-            Total Rows: {len(df)}
-            
-            User Question: {query}
-            
-            Answer strictly based on this data. If you need to perform calculations, explain the logic.
+            You are a SQL expert. We have a table named 'mytable' with these columns: {cols}.
+            The user wants to know: {query}
+            Give me ONLY the SQL query to answer this. No explanation.
+            Example: SELECT SUM(Sales) FROM mytable
             """
-            response = model.generate_content(prompt)
-            st.markdown(f"**AI Ka Jawab:**\n\n{response.text}")
-
-# 4. Data Preview
-with st.expander("Data Preview Dekhein"):
-    st.dataframe(df.head(100))
+            try:
+                # Step 1: AI se SQL query likhwao
+                response = model.generate_content(prompt)
+                sql_query = response.text.strip().replace('```sql', '').replace('```', '')
+                
+                # Step 2: Wo query Database par chalao
+                conn = sqlite3.connect('bishape_data.db')
+                result = pd.read_sql_query(sql_query, conn)
+                
+                # Step 3: Result dikhao
+                st.subheader("AI ka Jawab:")
+                st.write(result)
+                
+            except Exception as e:
+                st.error(f"Error: AI thoda confuse ho gaya. Try again!")
+                st.info("Tip: Sawal thoda clear pucho, jaise 'Sales column ka total dikhao'")
