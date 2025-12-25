@@ -27,25 +27,23 @@ def load_and_clean_data(file):
     try:
         df = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
         
-        # Step A: Column names fix
+        # Column names fix
         df.columns = [re.sub(r'[^a-zA-Z0-9]', '_', c) for c in df.columns]
         
-        # Step B: Sabse pehle khali cells ko 0 karo
+        # ✅ STEP 1: Sabse pehle poore data mein khali cells ko 0 karo
         df = df.fillna(0)
         
-        # Step C: Numeric columns ko check karke '0' fix karo
+        # ✅ STEP 2: Numeric columns ko force karke '0' fix karo
         for col in df.columns:
-            # Agar column number wala hona chahiye par text hai, toh use numeric banao
             if df[col].dtype == 'object' and not 'date' in col.lower():
-                # Jo conversion fail ho unhe 0 kar do
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
-        # Step D: Date formatting
+        # Date formatting for logistics/packing slips
         for col in df.columns:
             if 'date' in col.lower():
                 df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d')
         
-        conn = sqlite3.connect('bishape_final_pro.db', check_same_thread=False)
+        conn = sqlite3.connect('bishape_ultra_clean.db', check_same_thread=False)
         df.to_sql('mytable', conn, if_exists='replace', index=False)
         return df
     except Exception as e:
@@ -53,7 +51,7 @@ def load_and_clean_data(file):
         return None
 
 # --- APP INTERFACE ---
-uploaded_file = st.sidebar.file_uploader("Upload Master File", type=['xlsx', 'csv'])
+uploaded_file = st.sidebar.file_uploader("Upload Logistics Data", type=['xlsx', 'csv'])
 
 if uploaded_file:
     df = load_and_clean_data(uploaded_file)
@@ -66,11 +64,11 @@ if uploaded_file:
         c1, c2, c3 = st.columns(3)
         c1.metric("Total Records", f"{len(df):,}")
         if num_cols:
-            c2.metric("Total Value", f"₹{df[num_cols[0]].sum():,.0f}")
-            c3.metric("Data Quality", "100% (Cleaned)")
+            c2.metric("Total Business Value", f"₹{df[num_cols[0]].sum():,.0f}")
+            c3.metric("Data Health", "Error Zeroed (Safe)")
 
         # TABS
-        tab1, tab2, tab3 = st.tabs(["💬 AI Manager", "📈 Analytics", "🔮 Forecast"])
+        tab1, tab2, tab3 = st.tabs(["💬 AI Manager", "📈 Visual Analytics", "🔮 Trend Forecast"])
 
         with tab1:
             query = st.text_input("Sawal pucho (e.g. ASM performance report):")
@@ -80,10 +78,10 @@ if uploaded_file:
                     try:
                         response = model.generate_content(prompt + f" Query: {query}")
                         sql = re.sub(r'^(sqlite|sql|ite|markdown)\s*', '', response.text.strip().replace('```sql', '').replace('```', ''), flags=re.IGNORECASE)
-                        res = pd.read_sql_query(sql, sqlite3.connect('bishape_final_pro.db'))
+                        res = pd.read_sql_query(sql, sqlite3.connect('bishape_ultra_clean.db'))
                         st.dataframe(res, use_container_width=True)
                     except:
-                        st.warning("Bhai sawal mein column ka naam use karo (e.g. 'ASM wise sales').")
+                        st.warning("Bhai sawal mein column ka naam use karo.")
 
         with tab2:
             if num_cols:
@@ -95,14 +93,14 @@ if uploaded_file:
             st.subheader("Trend Forecast")
             if SKLEARN_READY and num_cols and len(df) > 5:
                 try:
-                    # ML ke liye data taiyaar karna
+                    # ✅ STEP 3: ML ke liye data ko "Zero Error" filter se guzaro
                     y_raw = df[num_cols[0]].values.reshape(-1, 1)
                     
-                    # 🧼 Final Safety: NaN ya Infinite ko handle karna
+                    # NaN ya Infinite ko handle karke '0' karna
                     y = np.nan_to_num(y_raw, nan=0.0, posinf=0.0, neginf=0.0)
                     x = np.arange(len(y)).reshape(-1, 1)
                     
-                    # Model Train
+                    # Final Fit
                     reg = LinearRegression().fit(x, y)
                     future_x = np.arange(len(y), len(y) + 7).reshape(-1, 1)
                     pred = reg.predict(future_x)
@@ -114,4 +112,4 @@ if uploaded_file:
             else:
                 st.info("Forecasting ke liye thoda aur numeric data chahiye.")
 else:
-    st.info("Waiting for data... Please upload from sidebar.")
+    st.info("Bhai, sidebar se file upload karo pehle!")
