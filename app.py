@@ -6,97 +6,99 @@ import re
 import plotly.express as px
 import numpy as np
 
-# sklearn import with safety
-try:
-    from sklearn.linear_model import LinearRegression
-    SKLEARN_READY = True
-except:
-    SKLEARN_READY = False
+# 1. UI Setup
+st.set_page_config(page_title="Bishape AI Pro Analytics", layout="wide", page_icon="📈")
+st.title("🛡️ Bishape Enterprise Command Center")
 
-# 1. Advanced UI
-st.set_page_config(page_title="Bishape AI Analytics Pro", layout="wide", page_icon="📈")
-
-# 2. AI Key Setup
+# 2. AI Setup
 API_KEY = "AIzaSyDyrJrSLXRyjG_Mp9n6W5DC_UidvGRMO50"
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-flash-latest')
 
-# 3. Data Engine
+# 3. Session State Initialization (Yaaddasht setup)
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 @st.cache_data
 def load_and_clean(file):
     df = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
     df.columns = [re.sub(r'[^a-zA-Z0-9]', '_', c) for c in df.columns]
-    
-    # 🧼 CLEANING: Khali cells ko 0 se bhar do taaki AI crash na ho
-    df = df.fillna(0) 
-    
-    # Date standardization
+    df = df.fillna(0)
     for col in df.columns:
         if 'date' in col.lower():
             df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d')
-            
-    conn = sqlite3.connect('bishape_pro.db', check_same_thread=False)
+    conn = sqlite3.connect('bishape_final.db', check_same_thread=False)
     df.to_sql('mytable', conn, if_exists='replace', index=False)
     return df
 
-if uploaded_file := st.sidebar.file_uploader("Upload Master File", type=['xlsx', 'csv']):
+# --- SIDEBAR & DATA LOADING ---
+with st.sidebar:
+    st.header("Settings")
+    uploaded_file = st.file_uploader("Upload Data", type=['xlsx', 'csv'])
+    if st.button("Clear Chat History"):
+        st.session_state.messages = []
+        st.rerun()
+
+if uploaded_file:
     df = load_and_clean(uploaded_file)
-    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cols = df.columns.tolist()
 
-    # --- KPI HEADER ---
-    st.title("🚀 Bishape Intelligence Dashboard")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Orders/Rows", len(df))
-    if num_cols:
-        c2.metric("Total Business Value", f"₹{df[num_cols[0]].sum():,.0f}")
-        c3.metric("Avg Order Size", f"₹{df[num_cols[0]].mean():,.2f}")
+    # Column Mapping for Logistics/Packing Slips
+    with st.sidebar.expander("🛠️ Column Mapping", expanded=True):
+        date_col = st.selectbox("Date Column", cols)
+        sales_col = st.selectbox("Sales/Value Column", cols)
+        customer_col = st.selectbox("Customer Name", cols)
 
-    # --- TABS ---
-    tab1, tab2, tab3 = st.tabs(["💬 AI Manager", "📈 Visual Analytics", "🔮 Trend Forecast"])
+    # Metrics Display
+    st.subheader("📌 Live Business Metrics")
+    m1, m2 = st.columns(2)
+    m1.metric("Total Rows", len(df))
+    # Correcting the Total Sales calculation
+    actual_sales = pd.to_numeric(df[sales_col], errors='coerce').sum()
+    m2.metric("Total Business Value", f"₹{actual_sales:,.0f}")
 
-    with tab1:
-        st.subheader("Data se sawal pucho (e.g. ASM wise Packing Slips ki report do)")
-        query = st.text_input("Sawal:")
-        if query:
-            with st.spinner('AI Report bana raha hai...'):
-                prompt = f"SQLite Expert. Table 'mytable', Columns: {df.columns.tolist()}. Return ONLY SQL query using double quotes for columns."
+    # --- ADVANCE CHAT INTERFACE ---
+    # Purane messages dikhana
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            if "df" in message:
+                st.dataframe(message["df"])
+            else:
+                st.markdown(message["content"])
+
+    # Naya Sawal (Chat Input)
+    if prompt_input := st.chat_input("Apna sawal yahan likhein..."):
+        # User ka sawal screen par dikhao
+        st.session_state.messages.append({"role": "user", "content": prompt_input})
+        with st.chat_message("user"):
+            st.markdown(prompt_input)
+
+        # AI ka response generate karo
+        with st.chat_message("assistant"):
+            with st.spinner("AI dimaag laga raha hai..."):
+                ai_prompt = f"""
+                SQLite expert. Table 'mytable'.
+                Mapping: Date="{date_col}", Sales="{sales_col}", Customer="{customer_col}".
+                Columns: {cols}
+                User query: {prompt_input}
+                Return ONLY raw SQL.
+                """
                 try:
-                    response = model.generate_content(prompt + f" Query: {query}")
+                    response = model.generate_content(ai_prompt)
                     sql = re.sub(r'^(sqlite|sql|ite|markdown)\s*', '', response.text.strip().replace('```sql', '').replace('```', ''), flags=re.IGNORECASE)
                     
-                    conn = sqlite3.connect('bishape_pro.db')
-                    res = pd.read_sql_query(sql, conn)
-                    st.dataframe(res, use_container_width=True)
+                    conn = sqlite3.connect('bishape_final.db')
+                    res_df = pd.read_sql_query(sql, conn)
+                    
+                    if not res_df.empty:
+                        st.dataframe(res_df)
+                        st.session_state.messages.append({"role": "assistant", "content": "Ye raha aapka result:", "df": res_df})
+                    else:
+                        st.write("Data nahi mila.")
+                        st.session_state.messages.append({"role": "assistant", "content": "Koi record nahi mila."})
                 except Exception as e:
-                    st.error("Bhai sawal thoda clear pucho, ya column ka sahi naam likho.")
-
-    with tab2:
-        st.subheader("Interactive Distribution")
-        if num_cols:
-            sel_col = st.selectbox("Kaunsa column analyze karein?", num_cols)
-            fig = px.violin(df, y=sel_col, box=True, points="all", template="plotly_dark")
-            st.plotly_chart(fig, use_container_width=True)
-
-    with tab3:
-        st.subheader("🔮 Predictive Forecasting")
-        if SKLEARN_READY and num_cols and len(df) > 10:
-            try:
-                # 🧼 FINAL CLEANING for Prediction
-                y = df[num_cols[0]].values.reshape(-1, 1)
-                x = np.arange(len(y)).reshape(-1, 1)
-                
-                # Model Training
-                reg = LinearRegression().fit(x, y)
-                future_x = np.arange(len(y), len(y) + 10).reshape(-1, 1)
-                pred = reg.predict(future_x)
-                
-                st.write(f"Analyzing trends for **{num_cols[0]}**...")
-                st.line_chart(pred)
-                st.success("Ye AI ka andaza hai agle 10 records ke liye.")
-            except Exception as e:
-                st.warning(f"Forecasting mein dikat hai: {e}")
-        else:
-            st.info("Bhai, forecasting ke liye kam se kam 10 numeric records chahiye.")
+                    st.error(f"Error: {e}")
+                    st.session_state.messages.append({"role": "assistant", "content": "Bhai, SQL query mein gadbad ho gayi."})
 
 else:
-    st.info("Waiting for your Master Excel... Sidebar se upload karo!")
+    st.info("Sidebar se file upload karein aur Analytics chalu karein!")
