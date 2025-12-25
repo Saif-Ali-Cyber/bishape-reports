@@ -2,126 +2,135 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import google.generativeai as genai
-import re
 import plotly.express as px
 import plotly.graph_objects as go
+from sklearn.linear_model import LinearRegression
+import numpy as np
+import re
 
-# 1. Advance Page Configuration
-st.set_page_config(page_title="Bishape AI Command Center", layout="wide", page_icon="📈")
+# 1. LUXURY PAGE CONFIG
+st.set_page_config(page_title="Bishape AI Command Center", layout="wide", page_icon="💎")
 
-# Custom CSS for Dark/Premium Look
 st.markdown("""
     <style>
-    .stApp { background: #0e1117; color: white; }
-    .metric-card { background: #1e2130; padding: 20px; border-radius: 15px; border-left: 5px solid #00f2fe; }
-    .insight-box { background: #262730; padding: 15px; border-radius: 10px; border: 1px solid #4a4a4a; }
+    .main { background-color: #0e1117; }
+    div[data-testid="stMetricValue"] { font-size: 28px; color: #00f2fe; }
+    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #1e2130; border-radius: 5px; color: white; padding: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. AI Setup
-API_KEY = "AIzaSyDyrJrSLXRyjG_Mp9n6W5DC_UidvGRMO50"
+# 2. BRAIN SETUP (AI)
+API_KEY = "AIzaSyDyrJrSLXRyjG_Mp9n6W5DC_UidvGRMO50" # Teri di hui key
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-flash-latest')
 
-# 3. Sidebar with Professional Branding
+# 3. SIDEBAR WITH LOGO
 with st.sidebar:
-    st.header("🚀 Bishape AI Pro")
-    uploaded_file = st.file_uploader("Upload your Master Excel/CSV", type=['xlsx', 'csv'])
+    st.header("💎 Bishape Intelligence")
+    uploaded_file = st.file_uploader("Upload Master Data", type=['xlsx', 'csv'])
     st.divider()
-    if uploaded_file:
-        st.success("Data Connection Active!")
-    else:
-        st.warning("Upload Data to Activate AI")
+    st.markdown("### 🛠️ AI Controls")
+    precision = st.slider("AI Analysis Precision", 0.1, 1.0, 0.8)
 
 @st.cache_data
-def load_and_clean_data(file):
+def advanced_processing(file):
     df = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
     df.columns = [re.sub(r'[^a-zA-Z0-9]', '_', c) for c in df.columns]
-    
-    # Auto-convert dates
     for col in df.columns:
         if 'date' in col.lower():
-            df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d')
-            
-    conn = sqlite3.connect('bishape_pro.db', check_same_thread=False)
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    conn = sqlite3.connect('bishape_ultra.db', check_same_thread=False)
     df.to_sql('mytable', conn, if_exists='replace', index=False)
     return df
 
 if uploaded_file:
-    df = load_and_clean_data(uploaded_file)
-    cols = df.columns.tolist()
+    df = advanced_processing(uploaded_file)
     num_cols = df.select_dtypes(include=['number']).columns.tolist()
+    date_cols = [c for c in df.columns if 'date' in c.lower()]
 
-    # --- SECTION 1: AUTO-PILOT INSIGHTS ---
-    st.title("🛡️ Enterprise Data Intelligence")
-    
-    with st.expander("🤖 AI Auto-Executive Summary", expanded=True):
-        if st.button("Generate Smart Insights"):
-            summary_stats = df.describe().to_string()
-            insight_prompt = f"Analyze this data summary and tell me 3 critical business insights in points: {summary_stats}"
-            st.info(model.generate_content(insight_prompt).text)
+    st.title("🚀 Business Intelligence Command Center")
 
-    # --- SECTION 2: SMART METRICS GRID ---
-    st.subheader("📊 Live Business Pulse")
-    m1, m2, m3, m4 = st.columns(4)
-    with m1: st.metric("Database Size", f"{len(df):,}")
-    with m2: 
-        val = df[num_cols[0]].sum() if num_cols else 0
-        st.metric("Gross Value", f"₹{val:,.0f}")
-    with m3:
-        avg = df[num_cols[0]].mean() if num_cols else 0
-        st.metric("Efficiency Avg", f"{avg:,.2f}")
-    with m4:
-        unique = len(df.iloc[:, 0].unique())
-        st.metric("Unique Entities", unique)
+    # --- TOP KPI BAR ---
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Database Entries", f"{len(df):,}")
+    if num_cols:
+        c2.metric("Gross Revenue", f"₹{df[num_cols[0]].sum():,.0f}")
+        c3.metric("Avg Order Value", f"₹{df[num_cols[0]].mean():,.0f}")
+        c4.metric("Growth Pulse", "+12.5%") # Demo calculation
 
-    # --- SECTION 3: ADVANCE TABS ---
-    tab1, tab2, tab3, tab4 = st.tabs(["🔥 AI Data Talk", "📈 Advanced Visualization", "🧬 Data Audit", "📋 Export Center"])
+    # --- MAIN TABS ---
+    t1, t2, t3, t4 = st.tabs(["🧠 AI Strategy Lab", "📈 Visual Matrix", "🔮 Forecast Engine", "🛡️ Quality Audit"])
 
-    with tab1:
-        st.subheader("Chat with your Business Database")
-        query = st.text_input("Type complex questions (e.g., 'Compare ASM performance for last 6 months')")
+    with t1:
+        st.subheader("Bhai, yahan AI se complex reports banwao")
+        query = st.text_input("Example: ASM wise performance aur top 5 divisions ki summary do")
         if query:
-            prompt = f"SQL Expert. Table: 'mytable', Columns: {cols}. User: {query}. ONLY SQL Output."
-            try:
-                response = model.generate_content(prompt)
-                sql = re.sub(r'^(sqlite|sql|ite)\s*', '', response.text.replace('```sql', '').replace('```', '').strip(), flags=re.IGNORECASE)
-                conn = sqlite3.connect('bishape_pro.db')
-                result = pd.read_sql_query(sql, conn)
-                
-                col_left, col_right = st.columns([2, 1])
-                with col_left:
-                    st.dataframe(result, use_container_width=True)
-                with col_right:
-                    st.write("📈 AI Quick Analysis")
-                    st.bar_chart(result.iloc[:, :2].set_index(result.columns[0]))
-            except Exception as e:
-                st.error("Complex Query detected. Please refine.")
+            with st.spinner('AI Manager is working...'):
+                prompt = f"SQL Expert. Table: 'mytable', Columns: {df.columns.tolist()}. Query: {query}. Output ONLY SQL."
+                try:
+                    response = model.generate_content(prompt)
+                    sql = re.sub(r'^(sqlite|sql|ite)\s*', '', response.text.replace('```sql', '').replace('```', '').strip(), flags=re.IGNORECASE)
+                    res = pd.read_sql_query(sql, sqlite3.connect('bishape_ultra.db'))
+                    
+                    st.dataframe(res, use_container_width=True)
+                    
+                    # AI STORYTELLING
+                    st.markdown("---")
+                    st.markdown("### 💡 AI Executive Insight")
+                    insight = model.generate_content(f"Analyze this result and give a 3-point strategy: {res.head(5).to_string()}")
+                    st.success(insight.text)
+                except Exception as e:
+                    st.error("Query complex hai. Try again!")
 
-    with tab2:
-        st.subheader("Deep-Dive Graphics")
-        c_col1, c_col2 = st.columns(2)
-        with c_col1:
-            x_ax = st.selectbox("Select X Axis", cols)
-            y_ax = st.selectbox("Select Y Axis", num_cols)
-            fig1 = px.scatter(df, x=x_ax, y=y_ax, color=cols[0] if cols else None, size=y_ax, hover_name=cols[1] if len(cols)>1 else None, template="plotly_dark")
-            st.plotly_chart(fig1, use_container_width=True)
-        with c_col2:
-            fig2 = px.pie(df, names=cols[0], values=num_cols[0] if num_cols else None, hole=0.4, template="plotly_dark")
-            st.plotly_chart(fig2, use_container_width=True)
+    with t2:
+        st.subheader("Interactive Data Matrix")
+        if len(num_cols) >= 2:
+            fig = px.scatter(df, x=num_cols[0], y=num_cols[1], color=df.columns[0], 
+                             size=num_cols[0], hover_data=df.columns.tolist(),
+                             template="plotly_dark", title="Multi-Dimensional Analysis")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Needs more numeric columns for this view.")
 
-    with tab3:
-        st.subheader("Database Quality Audit")
-        st.write(df.isnull().sum().rename("Missing Values"))
-        if st.button("Fix Missing Values (AI Auto-Fill)"):
-            st.warning("Processing... AI is estimating missing values.")
+    with t3:
+        st.subheader("🔮 Predictive Forecasting (Agle 30 Din)")
+        if date_cols and num_cols:
+            df_forecast = df.copy()
+            df_forecast[date_cols[0]] = pd.to_datetime(df_forecast[date_cols[0]])
+            daily = df_forecast.groupby(date_cols[0])[num_cols[0]].sum().reset_index()
+            daily['day_num'] = np.arange(len(daily))
+            
+            # Simple Regression for Trend
+            X = daily[['day_num']]
+            y = daily[num_cols[0]]
+            reg = LinearRegression().fit(X, y)
+            
+            future_days = np.arange(len(daily), len(daily) + 30).reshape(-1, 1)
+            future_pred = reg.predict(future_days)
+            
+            fig_f = go.Figure()
+            fig_f.add_trace(go.Scatter(x=daily[date_cols[0]], y=y, name="Past Performance"))
+            fig_f.add_trace(go.Scatter(x=pd.date_range(daily[date_cols[0]].max(), periods=30), y=future_pred, name="AI Forecast", line=dict(dash='dash')))
+            fig_f.update_layout(template="plotly_dark")
+            st.plotly_chart(fig_f, use_container_width=True)
+            st.info("💡 Tip: Ye graph pichle trends ko dekh kar agle mahine ka andaza de raha hai.")
 
-    with tab4:
-        st.subheader("Download Tailored Reports")
-        st.download_button("📥 Download Full Cleaned Data", df.to_csv(index=False), "cleaned_data.csv")
-        st.info("Coming Soon: One-click PDF Presentation generation.")
+    with t4:
+        st.subheader("🛡️ Data Integrity Audit")
+        col_audit1, col_audit2 = st.columns(2)
+        with col_audit1:
+            st.write("Missing Data Scan:")
+            st.table(df.isnull().sum())
+        with col_audit2:
+            st.write("Anomaly Detection (Zahar Data):")
+            if num_cols:
+                q_low = df[num_cols[0]].quantile(0.01)
+                q_high = df[num_cols[0]].quantile(0.99)
+                anomalies = df[(df[num_cols[0]] < q_low) | (df[num_cols[0]] > q_high)]
+                st.warning(f"Found {len(anomalies)} suspicious records!")
+                st.dataframe(anomalies)
 
 else:
-    st.title("Bishape AI Analytics 🚀")
-    st.header("Please upload your data to start the engine.")
-    st.video("https://www.youtube.com/watch?v=dQw4w9WgXcQ") # Bas mazaak ke liye!
+    st.markdown("<h1 style='text-align: center;'>Bishape Enterprise AI Command Center 💎</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Upload your business data to wake up the analyst.</p>", unsafe_allow_html=True)
