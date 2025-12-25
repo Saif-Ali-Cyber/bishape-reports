@@ -4,69 +4,78 @@ import sqlite3
 import google.generativeai as genai
 import re
 
-# 1. AI Setup
+# 1. Page Config
 st.set_page_config(page_title="Bishape AI Pro", layout="wide")
 st.title("🤖 Bishape Smart AI Reporter")
 
-# API Key ko saaf (clean) karke uthana
-try:
-    if "GEMINI_API_KEY" not in st.secrets:
-        st.error("Bhai, Streamlit Secrets mein API Key nahi mili!")
-        st.stop()
-    
-    api_key = st.secrets["GEMINI_API_KEY"].strip() # Faltu spaces hatane ke liye
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-except Exception as e:
-    st.error(f"Setup Error: {e}")
-    st.stop()
+# 2. AI Setup (Teri di hui Key yahan set kar di hai)
+API_KEY = "AIzaSyDyrJrSLXRyjG_Mp9n6W5DC_UidvGRMO50"
+genai.configure(api_key=API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 2. Heavy File Processing (100MB Friendly)
-uploaded_file = st.file_uploader("Apni Excel/CSV file dalo", type=['xlsx', 'csv'])
+# 3. Heavy File Processing (100MB Friendly)
+uploaded_file = st.file_uploader("Apni Excel ya CSV file yahan dalo (100MB tak allow hai)", type=['xlsx', 'csv'])
 
 @st.cache_data
 def load_data_to_sqlite(file):
     # Data load karo
-    if file.name.endswith('.csv'):
-        df = pd.read_csv(file)
-    else:
-        df = pd.read_excel(file)
-    
-    # SQLite Database banana
-    conn = sqlite3.connect('data.db', check_same_thread=False)
-    # Column names se spaces hatana taaki SQL query na toote
-    df.columns = [c.replace(' ', '_').replace('(', '').replace(')', '') for c in df.columns]
-    df.to_sql('mytable', conn, if_exists='replace', index=False)
-    return df.columns.tolist(), len(df)
+    try:
+        if file.name.endswith('.csv'):
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_excel(file)
+        
+        # SQLite Database banana (Memory manage karne ke liye)
+        conn = sqlite3.connect('data.db', check_same_thread=False)
+        # Column names ko clean karna (Spaces hatana)
+        df.columns = [c.replace(' ', '_').replace('(', '').replace(')', '').replace('/', '_') for c in df.columns]
+        df.to_sql('mytable', conn, if_exists='replace', index=False)
+        return df.columns.tolist(), len(df), df.head(5)
+    except Exception as e:
+        return None, 0, str(e)
 
 if uploaded_file:
-    with st.spinner('File process ho rahi hai...'):
-        cols, total_rows = load_data_to_sqlite(uploaded_file)
-        st.success(f"Taiyaar! {total_rows} rows aur ye columns mile: {', '.join(cols)}")
+    with st.spinner('Bhai wait kar, file badi hai, dimaag laga raha hoon...'):
+        cols, total_rows, preview = load_data_to_sqlite(uploaded_file)
+        
+        if cols:
+            st.success(f"Maza aa gaya! {total_rows} rows mil gayi hain.")
+            st.write("Aapke Columns ye hain:", cols)
+        else:
+            st.error(f"Error: {preview}")
 
-    # 3. Chat Logic
-    query = st.text_input("Sawal pucho (e.g. Total sales kitni hai?)")
+    # 4. Chat Interface
+    st.divider()
+    st.subheader("💬 Apne Data Se Sawal Puchein")
+    query = st.text_input("Example: Sabse zyada sales kisne ki? Ya total count kya hai?")
 
     if query:
-        with st.spinner('AI dimaag laga raha hai...'):
-            # AI ko sirf instruction do, data nahi
+        with st.spinner('AI data check kar raha hai...'):
+            # AI ko instruction dena
             prompt = f"""
-            You are a SQL expert. We have a table 'mytable' with columns: {cols}.
-            User wants to know: {query}
-            Output ONLY the SQL query. No text, no markdown.
+            You are a SQL expert. We have a table 'mytable' with these columns: {cols}.
+            The user wants to know: {query}
+            Give me ONLY the SQL query that can answer this. 
+            Do not provide any text explanation, only the query.
             Example: SELECT SUM(Sales) FROM mytable
             """
             try:
+                # Step 1: AI se SQL likhwana
                 response = model.generate_content(prompt)
-                # Query se ```sql aur faltu cheezein hatana
                 clean_sql = re.sub(r'```sql|```', '', response.text).strip()
                 
-                # Database se answer nikalna
+                # Step 2: Database se result nikalna
                 conn = sqlite3.connect('data.db')
                 result = pd.read_sql_query(clean_sql, conn)
                 
+                # Step 3: Result dikhana
                 st.subheader("AI Ka Jawab:")
-                st.write(result)
+                st.dataframe(result)
             except Exception as e:
-                st.error("AI thoda confuse ho gaya. Koshish karein ki column ka naam sawal mein likhein.")
-                st.info(f"Technical Error: {e}")
+                st.warning("AI sawal samajh nahi paya. Thoda simple karke pucho (jaise column ka naam use karo).")
+                st.info(f"Koshish ki gayi query: {clean_sql if 'clean_sql' in locals() else 'None'}")
+
+# 5. Preview Table
+with st.expander("Data ka Preview Dekhein"):
+    if uploaded_file and cols:
+        st.write(preview)
