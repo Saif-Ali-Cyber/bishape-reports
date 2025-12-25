@@ -20,14 +20,8 @@ uploaded_file = st.file_uploader("Apni Excel/CSV file dalo", type=['xlsx', 'csv'
 def load_data_to_sqlite(file):
     try:
         df = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
-        
-        # 🛠️ DATE FIX: Agar column mein 'Date' hai toh use sahi format mein badlo
-        for col in df.columns:
-            if 'date' in col.lower():
-                df[col] = pd.to_datetime(df[col]).dt.strftime('%Y-%m-%d')
-        
         conn = sqlite3.connect('data.db', check_same_thread=False)
-        # Columns clean karna
+        # Columns clean karna taaki SQL na toote
         df.columns = [re.sub(r'[^a-zA-Z0-9]', '_', c) for c in df.columns]
         df.to_sql('mytable', conn, if_exists='replace', index=False)
         return df.columns.tolist(), len(df), df.head(5)
@@ -41,39 +35,33 @@ if uploaded_file:
 
     # 4. Chat Interface
     st.divider()
-    query = st.text_input("Data ke baare mein sawal pucho (e.g. Index trends dikhao):")
+    query = st.text_input("Data ke baare mein sawal pucho:")
 
     if query:
-        with st.spinner('AI data analysis kar raha hai...'):
-            # 🛠️ IMPROVED PROMPT
+        with st.spinner('AI SQLite query bana raha hai...'):
             prompt = f"""
             You are a SQLite expert. Table: 'mytable'. Columns: {cols}.
-            User Question: {query}
-            
-            RULES:
-            1. Wrap ALL column names in double quotes, like "Index" or "Date".
-            2. For trends, group by Date or Month.
-            3. Output ONLY the raw SQL query.
+            Question: {query}
+            Instruction: Provide ONLY the SQL query starting with SELECT. 
+            Do NOT include the word 'sqlite' or 'ite' or 'sql' in the output.
             """
             try:
                 response = model.generate_content(prompt)
+                
+                # 🛠️ NAYA CLEANING FILTER (Ye 'ite' aur faltu text ko hata dega)
                 sql_query = response.text.strip()
                 sql_query = re.sub(r'^(sqlite|ite|sql|markdown)\s*', '', sql_query, flags=re.IGNORECASE)
                 sql_query = sql_query.replace('```sql', '').replace('```', '').strip()
                 
+                # Database query chalana
                 conn = sqlite3.connect('data.db')
                 result = pd.read_sql_query(sql_query, conn)
                 
                 st.subheader("AI Ka Jawab:")
                 st.dataframe(result)
-                
-                # 🛠️ CHART AUTO-GENERATION: Agar trends hai toh graph bhi dikhao
-                if len(result.columns) >= 2:
-                    st.line_chart(result.set_index(result.columns[0]))
-                    
             except Exception as e:
-                st.error(f"Error: {e}")
-                st.info(f"Query check karein: {sql_query if 'sql_query' in locals() else 'None'}")
+                st.error(f"Error: AI ne galat query banayi. Query: {sql_query if 'sql_query' in locals() else 'None'}")
+                st.info(f"Technical details: {e}")
 
 with st.expander("Data Preview"):
     if uploaded_file and 'cols' in locals() and cols:
