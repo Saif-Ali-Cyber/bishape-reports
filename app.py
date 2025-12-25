@@ -2,63 +2,71 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import google.generativeai as genai
+import re
 
-# 1. AI Setup (Bilkul Clean)
+# 1. AI Setup
 st.set_page_config(page_title="Bishape AI Pro", layout="wide")
 st.title("🤖 Bishape Smart AI Reporter")
 
-# API Key ko saaf karke uthana (Extra space hata kar)
+# API Key ko saaf (clean) karke uthana
 try:
-    raw_key = st.secrets["GEMINI_API_KEY"]
-    api_key = raw_key.strip() # Strip se f फालतू spaces hat jayenge
+    if "GEMINI_API_KEY" not in st.secrets:
+        st.error("Bhai, Streamlit Secrets mein API Key nahi mili!")
+        st.stop()
+    
+    api_key = st.secrets["GEMINI_API_KEY"].strip() # Faltu spaces hatane ke liye
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 except Exception as e:
-    st.error("Bhai API Key setup mein dikkat hai. Streamlit Secrets check kar.")
+    st.error(f"Setup Error: {e}")
     st.stop()
 
-# 2. Heavy File Processing
-uploaded_file = st.file_uploader("Apni 100MB wali file dalo", type=['xlsx', 'csv'])
+# 2. Heavy File Processing (100MB Friendly)
+uploaded_file = st.file_uploader("Apni Excel/CSV file dalo", type=['xlsx', 'csv'])
 
 @st.cache_data
-def load_to_db(file):
+def load_data_to_sqlite(file):
     # Data load karo
-    df = pd.read_excel(file) if file.name.endswith('.xlsx') else pd.read_csv(file)
-    # Database se connect karo
-    conn = sqlite3.connect('bishape_data.db', check_same_thread=False)
-    # Data ko SQL table mein daal do
+    if file.name.endswith('.csv'):
+        df = pd.read_csv(file)
+    else:
+        df = pd.read_excel(file)
+    
+    # SQLite Database banana
+    conn = sqlite3.connect('data.db', check_same_thread=False)
+    # Column names se spaces hatana taaki SQL query na toote
+    df.columns = [c.replace(' ', '_').replace('(', '').replace(')', '') for c in df.columns]
     df.to_sql('mytable', conn, if_exists='replace', index=False)
     return df.columns.tolist(), len(df)
 
 if uploaded_file:
-    cols, row_count = load_to_db(uploaded_file)
-    st.success(f"File Ready! {row_count} rows aur {len(cols)} columns mile.")
+    with st.spinner('File process ho rahi hai...'):
+        cols, total_rows = load_data_to_sqlite(uploaded_file)
+        st.success(f"Taiyaar! {total_rows} rows aur ye columns mile: {', '.join(cols)}")
 
     # 3. Chat Logic
-    query = st.text_input("Data ke baare mein pucho (e.g. Total sales kitni hai?)")
+    query = st.text_input("Sawal pucho (e.g. Total sales kitni hai?)")
 
     if query:
         with st.spinner('AI dimaag laga raha hai...'):
-            # AI ko sirf Columns dikhao, pura data nahi!
+            # AI ko sirf instruction do, data nahi
             prompt = f"""
-            You are a SQL expert. We have a table named 'mytable' with these columns: {cols}.
-            The user wants to know: {query}
-            Give me ONLY the SQL query to answer this. No explanation.
+            You are a SQL expert. We have a table 'mytable' with columns: {cols}.
+            User wants to know: {query}
+            Output ONLY the SQL query. No text, no markdown.
             Example: SELECT SUM(Sales) FROM mytable
             """
             try:
-                # Step 1: AI se SQL query likhwao
                 response = model.generate_content(prompt)
-                sql_query = response.text.strip().replace('```sql', '').replace('```', '')
+                # Query se ```sql aur faltu cheezein hatana
+                clean_sql = re.sub(r'```sql|```', '', response.text).strip()
                 
-                # Step 2: Wo query Database par chalao
-                conn = sqlite3.connect('bishape_data.db')
-                result = pd.read_sql_query(sql_query, conn)
+                # Database se answer nikalna
+                conn = sqlite3.connect('data.db')
+                result = pd.read_sql_query(clean_sql, conn)
                 
-                # Step 3: Result dikhao
-                st.subheader("AI ka Jawab:")
+                st.subheader("AI Ka Jawab:")
                 st.write(result)
-                
             except Exception as e:
-                st.error(f"Error: AI thoda confuse ho gaya. Try again!")
-                st.info("Tip: Sawal thoda clear pucho, jaise 'Sales column ka total dikhao'")
+                st.error("AI thoda confuse ho gaya. Koshish karein ki column ka naam sawal mein likhein.")
+                st.info(f"Technical Error: {e}")
