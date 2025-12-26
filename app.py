@@ -37,21 +37,23 @@ def load_and_clean(file):
         df = rename_duplicates(df)
         df.columns = [re.sub(r'[^a-zA-Z0-9]', '_', c) for c in df.columns]
         df = rename_duplicates(df)
-        df = df.fillna(0) # Error Zeroed logic
+        
+        # 🧼 Error Zeroed logic: Missing values ko 0 karo
+        df = df.fillna(0) 
         
         # Date Handling for Logistics/Packing Slips
         for col in df.columns:
             if 'date' in col.lower():
                 df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d')
         
-        conn = sqlite3.connect('bishape_ultra_safe.db', check_same_thread=False)
+        conn = sqlite3.connect('bishape_final_safe.db', check_same_thread=False)
         df.to_sql('mytable', conn, if_exists='replace', index=False)
         return df
     except Exception as e:
         st.error(f"File Load Error: {e}")
         return None
 
-# Sidebar
+# Sidebar Upload
 uploaded_file = st.sidebar.file_uploader("Upload Logistics Master", type=['xlsx', 'csv'])
 
 if uploaded_file:
@@ -62,7 +64,7 @@ if uploaded_file:
 
         # Chat Interface
         st.divider()
-        query = st.text_input("Data se sawal pucho (e.g. Monthly sales pivot):")
+        query = st.text_input("Data se sawal pucho (e.g. State wise RSM sales):")
 
         if query:
             with st.spinner('AI Query ko sanitize kar raha hai...'):
@@ -84,21 +86,29 @@ if uploaded_file:
                     # 1. 'SELECT' ya 'WITH' dhoondo aur wahan se shuru karo
                     match = re.search(r'(SELECT|WITH)', sql_raw, re.IGNORECASE)
                     if match:
+                        # Sirf SQL part uthana aur semicolon tak limit karna
                         sql_final = sql_raw[match.start():].split(';')[0] + ';'
-                        # 2. Saare inline comments (--) aur newlines saaf karo
+                        # 2. Saare inline comments (--) aur unnecessary text saaf karo
                         sql_final = re.sub(r'--.*', '', sql_final) 
+                        # Newlines ko space mein badlo taaki query toote nahi
                         sql_final = sql_final.replace('\n', ' ').strip()
+                        # Extra spaces hatana
+                        sql_final = " ".join(sql_final.split())
                     else:
                         sql_final = sql_raw
 
-                    conn = sqlite3.connect('bishape_ultra_safe.db')
+                    conn = sqlite3.connect('bishape_final_safe.db')
                     result = pd.read_sql_query(sql_final, conn)
                     
                     st.subheader("AI Ka Jawab:")
                     st.dataframe(result, use_container_width=True)
-                    st.download_button("Download Report (CSV)", result.to_csv(index=False), "bishape_report.csv")
+                    
+                    # SQL Viewer to help you learn Python/SQL for Google Jobs
+                    with st.expander("View AI Generated SQL"):
+                        st.code(sql_final, language='sql')
+                        
                 except Exception as e:
-                    st.error("Syntax Error!")
+                    st.error("Syntax Error! AI ne query ke sath extra text likh diya.")
                     st.info(f"Sanitized Query: {sql_final if 'sql_final' in locals() else 'None'}")
                     st.info(f"Reason: {e}")
 else:
